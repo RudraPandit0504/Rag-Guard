@@ -22,6 +22,7 @@ def main():
 
     for f in sorted(data_dir.iterdir()):
         if f.suffix.lower() not in LOADERS:
+            print(f"Skipping {f.name}: unsupported extension '{f.suffix}'")
             continue
 
         raw = load_document(f)

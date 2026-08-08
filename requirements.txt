@@ -5,3 +5,5 @@ numpy
 scipy
 python-dotenv
 pypdf
+python-docx
+beautifulsoup4
