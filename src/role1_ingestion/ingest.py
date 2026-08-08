@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
+from loaders import load_document, LOADERS
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
@@ -18,14 +19,31 @@ from chunker import chunk_text, compute_hash
 
 # 1. Read the document
 data_dir = Path(__file__).resolve().parent.parent.parent / "data"
-raw = (data_dir / "sample.txt").read_text(encoding="utf-8")
+all_chunks = []
+all_sources = []
 
-chunks = chunk_text(raw)
-print(f"Chunks: {len(chunks)}")
+for f in sorted(data_dir.iterdir()):
+    if f.suffix.lower() not in LOADERS:
+        continue
+
+    raw = load_document(f)
+
+    if len(raw.strip()) < 100:
+        print(f"WARNING: {f.name} gave almost no text — possibly scanned")
+        continue
+
+    pieces = chunk_text(raw)
+    for piece in pieces:
+        all_chunks.append(piece)
+        all_sources.append(f.name)
+
+    print(f"{f.name}: {len(pieces)} chunks")
+
+print(f"Total: {len(all_chunks)} chunks")
 
 # 2. Turn each chunk into 384 numbers
 model = SentenceTransformer("all-MiniLM-L6-v2")
-vectors = model.encode(chunks)
+vectors = model.encode(all_chunks)
 print(f"Vectors: {vectors.shape}")
 
 # 3. Make a fresh collection in Qdrant
@@ -43,7 +61,7 @@ print(f"Collection '{COLLECTION_NAME}' created")
 # 4. Send the numbers to Qdrant
 points = [
     PointStruct(id=i, vector=vectors[i].tolist(), payload={"chunk_id": i})
-    for i in range(len(chunks))
+    for i in range(len(all_chunks))
 ]
 qdrant.upsert(collection_name=COLLECTION_NAME, points=points)
 print(f"Stored {len(points)} vectors in Qdrant")
@@ -57,13 +75,13 @@ now = datetime.now(timezone.utc)
 docs = [
     {
         "chunk_id": i,
-        "text": chunks[i],
-        "hash": compute_hash(chunks[i]),
+        "text": all_chunks[i],
+        "hash": compute_hash(all_chunks[i]),
         "created_at": now,
-        "source": "sample.txt",
+        "source": all_sources[i],
         "poisoned": False,
     }
-    for i in range(len(chunks))
+    for i in range(len(all_chunks))
 ]
 collection.insert_many(docs)
 print(f"Stored {len(docs)} documents in MongoDB")
