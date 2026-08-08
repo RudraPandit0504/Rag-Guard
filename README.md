@@ -79,7 +79,7 @@ Early development. The ingestion and retrieval layer is complete; the defence mo
 
 - [x] Vector and metadata storage provisioned
 - [x] Local embedding pipeline (`all-MiniLM-L6-v2`, 384-d)
-- [x] Multi-document ingestion (`.txt`, `.md`, `.pdf`) with overlapping chunks and SHA-256 hashing
+- [x] Multi-document ingestion (`.txt`, `.md`, `.pdf`, `.docx`, `.html`) with overlapping chunks and SHA-256 hashing
 - [x] `retrieve(query_text)` — Top-K vector search joined with metadata
 - [ ] Module 1 — attacker
 - [ ] Modules 2 and 3 — mathematical filters
@@ -131,7 +131,7 @@ An empty collection list is correct before the first ingestion run.
 
 ## Ingesting documents
 
-Place source documents in `data/`. Supported formats are `.txt`, `.md`, and `.pdf`. Adding another format means writing one loader function and adding one line to the `LOADERS` table in `src/role1_ingestion/loaders.py`.
+Place source documents in `data/`. Supported formats are `.txt`, `.md`, `.pdf`, `.docx`, and `.html`. Adding another format means writing one loader function and adding one line to the `LOADERS` table in `src/role1_ingestion/loaders.py`.
 
 ```bash
 python -m src.role1_ingestion.ingest
@@ -200,7 +200,7 @@ src/
   config.py                 shared settings and credential loading
   test_connection.py        database connectivity check
   role1_ingestion/
-    loaders.py              file format handling (.txt, .md, .pdf)
+    loaders.py              file format handling (.txt, .md, .pdf, .docx, .html)
     chunker.py              overlapping chunks + SHA-256 hashing
     ingest.py               embed and store into Qdrant + MongoDB
     retriever.py            retrieve(query_text) -> Top-K chunks
