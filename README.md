@@ -75,12 +75,12 @@ Evaluation runs the identical attack twice: once against the undefended pipeline
 
 ## Status
 
-Early development. The ingestion and retrieval layer is being built first; the defence modules follow.
+Early development. The ingestion and retrieval layer is complete; the defence modules follow.
 
 - [x] Vector and metadata storage provisioned
 - [x] Local embedding pipeline (`all-MiniLM-L6-v2`, 384-d)
-- [ ] Chunking, hashing, ingestion
-- [ ] `retrieve(query_text)`
+- [x] Multi-document ingestion (`.txt`, `.md`, `.pdf`) with overlapping chunks and SHA-256 hashing
+- [x] `retrieve(query_text)` — Top-K vector search joined with metadata
 - [ ] Module 1 — attacker
 - [ ] Modules 2 and 3 — mathematical filters
 - [ ] Modules 4 and 5 — authority and sandbox
@@ -129,6 +129,31 @@ An empty collection list is correct before the first ingestion run.
 
 ---
 
+## Ingesting documents
+
+Place source documents in `data/`. Supported formats are `.txt`, `.md`, and `.pdf`. Adding another format means writing one loader function and adding one line to the `LOADERS` table in `src/role1_ingestion/loaders.py`.
+
+```bash
+cd src/role1_ingestion
+python ingest.py
+```
+
+Each document is split into overlapping chunks of roughly 400 characters, advancing 320 characters per chunk so consecutive chunks share an 80-character margin. This prevents a sentence being destroyed by a cut landing mid-way through it. Every chunk is hashed with SHA-256 and embedded into a 384-dimensional vector.
+
+Vectors go to Qdrant; text, hash, timestamp, source filename, and a `poisoned` flag go to MongoDB. The two are linked by `chunk_id`. Re-running the script clears both stores first, so ingestion is idempotent.
+
+Scanned PDFs have no extractable text layer and are skipped with a warning. OCR is not currently supported.
+
+## Searching
+
+```bash
+python retriever.py
+```
+
+`retrieve(query_text, top_k=5)` embeds the query with the same model used at ingestion, asks Qdrant for the nearest vectors by cosine similarity, and joins each result with its MongoDB metadata. It returns a list of dicts containing `chunk_id`, `text`, `hash`, `created_at`, `poisoned`, `score`, and the raw `vector`.
+
+The raw vector is included deliberately: the downstream filters measure geometric distances between retrieved chunks and would otherwise have to re-embed the text themselves.
+
 ## Configuration
 
 | Variable | Source |
@@ -167,7 +192,12 @@ Shared constants live in `src/config.py`:
 ```
 src/
   config.py                 shared settings and credential loading
-  role1_ingestion/          chunking, hashing, embedding, retrieval
+  test_connection.py        database connectivity check
+  role1_ingestion/
+    loaders.py              file format handling (.txt, .md, .pdf)
+    chunker.py              overlapping chunks + SHA-256 hashing
+    ingest.py               embed and store into Qdrant + MongoDB
+    retriever.py            retrieve(query_text) -> Top-K chunks
   role2_filters/            attacker, consistency, outlier detection
   role3_sandbox/            authority scoring, sandbox evaluation
   role4_orchestration/      FastAPI, Gradio UI, final generation
