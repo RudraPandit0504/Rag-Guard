@@ -134,9 +134,10 @@ An empty collection list is correct before the first ingestion run.
 Place source documents in `data/`. Supported formats are `.txt`, `.md`, and `.pdf`. Adding another format means writing one loader function and adding one line to the `LOADERS` table in `src/role1_ingestion/loaders.py`.
 
 ```bash
-cd src/role1_ingestion
-python ingest.py
+python -m src.role1_ingestion.ingest
 ```
+
+Run this from the project root — `ingest.py` uses relative imports, so it must be run as a module, not as a standalone script.
 
 Each document is split into overlapping chunks of roughly 400 characters, advancing 320 characters per chunk so consecutive chunks share an 80-character margin. This prevents a sentence being destroyed by a cut landing mid-way through it. Every chunk is hashed with SHA-256 and embedded into a 384-dimensional vector.
 
@@ -147,8 +148,10 @@ Scanned PDFs have no extractable text layer and are skipped with a warning. OCR 
 ## Searching
 
 ```bash
-python retriever.py
+python -m src.role1_ingestion.retriever
 ```
+
+Also run from the project root, for the same reason as `ingest.py`.
 
 `retrieve(query_text, top_k=5)` embeds the query with the same model used at ingestion, asks Qdrant for the nearest vectors by cosine similarity, and joins each result with its MongoDB metadata. It returns a list of dicts containing `chunk_id`, `text`, `hash`, `created_at`, `poisoned`, `score`, and the raw `vector`.
 
@@ -166,6 +169,7 @@ The raw vector is included deliberately: the downstream filters measure geometri
 Shared constants live in `src/config.py`:
 
 - `VECTOR_SIZE = 384` — fixed by the embedding model; Qdrant rejects other lengths
+- `MODEL_NAME` — the sentence-transformers model used for embedding, shared by ingestion and retrieval so both stay in the same vector space
 - `COLLECTION_NAME` — Qdrant collection holding chunk vectors
 - `DB_NAME` — MongoDB database holding chunk text, timestamps, and hashes
 
@@ -178,7 +182,9 @@ Shared constants live in `src/config.py`:
 
 **Qdrant returns 401 or 403.** Wrong API key. Keys are shown once at creation; generate a new one if lost.
 
-**`No module named 'config'`.** Run from inside `src/`.
+**`No module named 'config'`.** For `test_connection.py`, run from inside `src/`. For `ingest.py` and `retriever.py`, run as a module from the project root instead — e.g. `python -m src.role1_ingestion.ingest` — since they use relative imports.
+
+**`attempted relative import with no known parent package`.** You ran `ingest.py` or `retriever.py` directly (`python ingest.py`). Run it as a module from the project root instead: `python -m src.role1_ingestion.ingest`.
 
 **`No module named 'dotenv'`.** Virtual environment not activated. Look for `(venv)` in your prompt.
 

@@ -1,18 +1,13 @@
-import sys
-from pathlib import Path
-
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from pymongo import MongoClient
 
-from config import (
+from ..config import (
     MONGO_URI, QDRANT_URL, QDRANT_API_KEY,
-    COLLECTION_NAME, DB_NAME,
+    COLLECTION_NAME, DB_NAME, MODEL_NAME,
 )
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
+model = SentenceTransformer(MODEL_NAME)
 qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 mongo = MongoClient(MONGO_URI)
 chunks_collection = mongo[DB_NAME]["chunks"]
@@ -59,6 +54,3 @@ if __name__ == "__main__":
     for r in retrieve(question):
         print(f"[{r['chunk_id']}] score={r['score']:.3f}")
         print(f"    {r['text'][:110]}...\n")
-
-    r = retrieve(question)[0]
-    print("vector present:", r["vector"] is not None)
