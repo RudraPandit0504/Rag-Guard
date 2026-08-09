@@ -15,6 +15,28 @@ from .chunker import chunk_text, compute_hash
 
 
 def main():
+    # 0. Injected poison lives only in the databases. The poisoned-hash restore
+    # below can only re-flag chunks rebuilt from data/, and injected poison is
+    # not in data/ — so a re-ingest destroys it for good. Ask first.
+    injected = MongoClient(MONGO_URI)[DB_NAME]["chunks"].count_documents(
+        {"source": "injected"}
+    )
+    if injected:
+        print(
+            f"WARNING: {injected} injected poison chunk(s) are currently stored.\n"
+            "Re-ingesting wipes both Qdrant and MongoDB. Injected poison is NOT\n"
+            "rebuilt from data/, so it will be lost permanently and would have to\n"
+            "be recreated by re-running the attacker module."
+        )
+        try:
+            answer = input("Type 'yes' to destroy it and continue: ").strip().lower()
+        except EOFError:
+            answer = ""
+
+        if answer != "yes":
+            print("Aborted — nothing was changed.")
+            return
+
     # 1. Read the document
     data_dir = Path(__file__).resolve().parent.parent.parent / "data"
     all_chunks = []

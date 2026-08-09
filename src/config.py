@@ -23,3 +23,14 @@ COLLECTION_NAME = "ragguard_chunks"
 DB_NAME = "ragguard"
 VECTOR_SIZE = 384
 MODEL_NAME = "all-MiniLM-L6-v2"
+
+# Role 2 math filters. Both stages share the same default so that a chunk has
+# to clear an equally strict bar on distance and on peer agreement.
+OUTLIER_THRESHOLD = 0.30
+CONSISTENCY_THRESHOLD = 0.30
+
+# Injected poison starts far above real chunk ids so the two never collide.
+POISON_START_ID = 10000
+
+# How many chunks retrieval returns, and therefore how many the filters judge.
+DEFAULT_TOP_K = 5
