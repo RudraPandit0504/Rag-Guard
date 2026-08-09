@@ -75,19 +75,21 @@ Evaluation runs the identical attack twice: once against the undefended pipeline
 
 ## Status
 
-Early development. The ingestion and retrieval layer is complete; the defence modules follow.
+Early development. The ingestion, retrieval, and mathematical filtering layers are complete; the behavioural modules follow.
 
 - [x] Vector and metadata storage provisioned
 - [x] Local embedding pipeline (`all-MiniLM-L6-v2`, 384-d)
 - [x] Multi-document ingestion (`.txt`, `.md`, `.pdf`, `.docx`, `.html`) with overlapping chunks and SHA-256 hashing
 - [x] `retrieve(query_text)` — Top-K vector search joined with metadata
-- [ ] Module 1 — attacker
-- [ ] Modules 2 and 3 — mathematical filters
+- [x] Module 1 — attacker
+- [x] Modules 2 and 3 — mathematical filters
 - [ ] Modules 4 and 5 — authority and sandbox
 - [ ] Orchestration and UI
 - [ ] Baseline vs defended evaluation
 
-**No benchmark results yet.** Any effectiveness claims in this README describe intended design, not measured outcomes. Numbers will be published here when the evaluation runs.
+**First measured result: the mathematical filters do not work.** Across five test queries against three injected poison chunks, Modules 2 and 3 caught none of the poison — a Vulnerability Score of 100% both undefended and defended. In the same run they removed 6 legitimate chunks, including on control queries that retrieved no poison at all. A density sweep at 1, 2, and 3 poison chunks found no density at which the behaviour changes. See [The central finding](#the-central-finding) for why.
+
+Modules 4 and 5 are not yet built, so this is not a result for Rag-Guard as a whole — it is a result for the geometric layer alone.
 
 ---
 
@@ -157,6 +159,39 @@ Also run from the project root, for the same reason as `ingest.py`.
 
 The raw vector is included deliberately: the downstream filters measure geometric distances between retrieved chunks and would otherwise have to re-embed the text themselves.
 
+## Poisoning and filtering
+
+**Order matters.** `ingest.py` must run before `attacker.py`. Injected poison exists only in the databases — it is not rebuilt from `data/` — and re-running ingestion clears both stores, destroying it irrecoverably. `ingest.py` detects existing injected chunks and asks for confirmation before proceeding, but the only way to recover them afterwards is to inject again.
+
+```bash
+python -m src.role1_ingestion.ingest      # first: build the clean corpus
+python -m src.role2_filters.attacker      # then: generate and inject poison
+```
+
+`attacker.py` scores its candidate templates against the target query, mutates the strongest one to raise its similarity further, injects it, and confirms it was retrieved. Poison is written with `poisoned: True` and `source: "injected"` at chunk IDs starting from `POISON_START_ID` (10000), far above real chunk IDs so the two never collide.
+
+The individual filters can be inspected on their own. Each prints a per-chunk diagnostic table and a threshold sweep:
+
+```bash
+python -m src.role2_filters.outlier       # Module 3 — distance from centroid
+python -m src.role2_filters.consistency   # Module 2 — pairwise agreement
+```
+
+The combined filter and the evaluation:
+
+```bash
+python -m src.role2_filters.filters       # apply_math_filters() on one query
+python -m src.role2_filters.evaluate      # Vulnerability Score, baseline vs defended
+```
+
+`evaluate.py` only reads. `attacker.py` and `density_experiment.py` write to both stores:
+
+```bash
+python -m src.role2_filters.density_experiment
+```
+
+The density experiment clears and re-injects poison at counts of 1, 2, and 3, measuring the filters at each. It restores the 3-poison state when it finishes, including on error.
+
 ## Configuration
 
 | Variable | Source |
@@ -204,10 +239,16 @@ src/
     chunker.py              overlapping chunks + SHA-256 hashing
     ingest.py               embed and store into Qdrant + MongoDB
     retriever.py            retrieve(query_text) -> Top-K chunks
-  role2_filters/            attacker, consistency, outlier detection
+  role2_filters/
+    attacker.py             Module 1 — poison templates, mutation, injection
+    consistency.py          Module 2 — pairwise agreement between chunks
+    outlier.py              Module 3 — distance from the retrieved centroid
+    filters.py              apply_math_filters() — Modules 2 and 3 in sequence
+    evaluate.py             Vulnerability Score, baseline vs defended
+    density_experiment.py   filter behaviour across poison densities
   role3_sandbox/            authority scoring, sandbox evaluation
   role4_orchestration/      FastAPI, Gradio UI, final generation
-data/                       source documents and poisoned test data
+data/                       source documents
 ```
 
 Each stage exposes one function and imports the stage before it:
@@ -219,13 +260,45 @@ Each stage exposes one function and imports the stage before it:
 | Trust and sandbox | `apply_sandbox_filters(math_filtered_chunks)` |
 | Orchestration | Full pipeline and interface |
 
+Every stage takes and returns the same shape — the list of dicts `retrieve()` produces — so the stages chain directly:
+
+```python
+chunks    = retrieve("How long do I have to return a product?")
+survivors = apply_math_filters(chunks)
+final     = apply_sandbox_filters(survivors)
+```
+
+`apply_math_filters(retrieved_chunks, outlier_threshold=..., consistency_threshold=...)` runs Module 3 first, then Module 2 on its survivors; a chunk must pass both. It returns only the surviving chunks, with their original fields unchanged.
+
+For evaluation, `apply_math_filters_verbose()` takes the same arguments but returns `{"kept": [...], "dropped": [...]}`, where each dropped chunk carries its original fields plus `filter` (which check removed it) and `reason` (the measured value and threshold that decided it). The plain function is a wrapper around the verbose one, so both always agree.
+
+---
+
+## The central finding
+
+Modules 2 and 3 rest on a shared assumption: that a poisoned chunk sits further from the semantic centre of the retrieved set than legitimate content does. The measurements contradict it.
+
+The mechanism is circular. Poison is optimised for similarity to the target query — that is what makes it get retrieved at all. But the retrieved set is, by definition, whatever ranks nearest that same query. So a chunk engineered to rank highly for a query does not land at the edge of that query's neighbourhood; it lands near its centre. The better the attack, the more central the poison.
+
+Measured mean cosine distance from the retrieved centroid, across the density sweep:
+
+| Poison chunks | Poison distance | Legitimate distance |
+| --- | --- | --- |
+| 1 | 0.264 | 0.325 |
+| 2 | 0.194 | 0.314 |
+| 3 | 0.212 | 0.292 |
+
+Poison is closer to the centroid than legitimate content at every density tested. A distance threshold that drops the poison necessarily drops the legitimate chunks first — which is what the 6 collateral removals in the evaluation are. This is not a tuning problem, and no choice of threshold fixes it: the ordering itself is wrong.
+
+This motivates Modules 4 and 5, which do not use embedding geometry. Authority scoring ranks by provenance and age; the sandbox replays each chunk in isolation and judges what it *does*. A chunk that is geometrically indistinguishable from legitimate content still behaves differently when a model reads it alone, and behaviour is what the remaining modules test.
+
 ---
 
 ## Known limitations
 
 Stated up front, because a security tool that hides its failure modes is worse than none.
 
-**Threshold sensitivity.** The outlier filter's 0.15 cosine-distance cutoff demands 0.85 similarity to the retrieved centroid. In practice, two genuinely related sentences often score around 0.5–0.7 cosine similarity — meaning legitimate chunks may be discarded alongside poisoned ones. Finding where this threshold actually belongs is an open question in this work, not a solved parameter.
+**Threshold sensitivity.** The outlier filter's 0.30 cosine-distance cutoff demands 0.70 similarity to the retrieved centroid. In practice, two genuinely related sentences often score around 0.5–0.7 cosine similarity — meaning legitimate chunks may be discarded alongside poisoned ones. Finding where this threshold actually belongs is an open question in this work, not a solved parameter.
 
 **Attacks the geometry misses.** A poisoned chunk crafted to sit *inside* the semantic cluster rather than outside it will pass Modules 2 and 3. The sandbox exists to catch these, which is why the layers are independent.
 
@@ -234,6 +307,12 @@ Stated up front, because a security tool that hides its failure modes is worse t
 **Latency and cost.** Per-chunk sandbox evaluation multiplies API calls by the number of surviving chunks. Cheap filters run first to reduce this, but the overhead is real and is a large part of why defences like this are skipped in practice.
 
 **Single embedding model.** Everything is built and tuned against `all-MiniLM-L6-v2`. Thresholds will not transfer unchanged to models with different dimensionality or similarity distributions.
+
+**The test state is not reproducible from the repository.** Poison exists only in the live databases. There is no seed fixture or exported corpus, so cloning the repo and running the evaluation against your own Qdrant and MongoDB reports `n/a` everywhere until you run the attacker yourself — and the poison you generate is not guaranteed to match the numbers published here. The published results are reproducible in principle, since `mutate()` is deterministic, but nothing in the repository pins them.
+
+**Poison timestamps reset on re-injection.** `inject()` stamps `created_at` with the current time. Module 4 ranks trust by document age, so identical poison scores differently depending on when it was last injected. Until the timestamp is pinned, Module 4's results will not be reproducible across runs.
+
+**The embedding model loads twice.** `retriever.py` and `attacker.py` each instantiate `SentenceTransformer` at import time, so importing both costs roughly 12 seconds and twice the memory. Both modules also open their own Qdrant and MongoDB clients at import, which means they cannot be imported at all without live credentials — inconvenient for tests and CI.
 
 ---
 
