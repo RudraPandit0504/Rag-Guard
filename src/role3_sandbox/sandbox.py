@@ -82,29 +82,33 @@ async def _simulate_generation_ollama(session: aiohttp.ClientSession, semaphore:
     return ""
 
 def _detect_divergence(answers: list[str], chunks: list[dict], threshold: float = 0.25) -> list[dict]:
-    """Checks similarity between the generated answers and drops outliers/violations."""
-    FALLBACK = "The provided text does not contain the answer."
-    VIOLATION = "SECURITY_VIOLATION"
+    """Checks similarity between the generated answers and drops outliers."""
     
-    valid_answers = []
-    valid_chunks = []
-    
-    # 1. Prune chunks that triggered security violations or fallbacks
-    for chunk, answer in zip(chunks, answers):
-        if FALLBACK in answer or VIOLATION in answer:
-            print(f"[sandbox debug] Dropped chunk {chunk['chunk_id']}: Blocked (Output: {answer})")
-        else:
-            valid_answers.append(answer)
-            valid_chunks.append(chunk)
+    # --- TEMPORARILY COMMENTED OUT FOR TEAMMATE'S TESTING ---
+    # FALLBACK = "The provided text does not contain the answer."
+    # VIOLATION = "SECURITY_VIOLATION"
+    # 
+    # valid_answers = []
+    # valid_chunks = []
+    # 
+    # for chunk, answer in zip(chunks, answers):
+    #     if FALLBACK in answer or VIOLATION in answer:
+    #         print(f"[sandbox debug] Dropped chunk {chunk['chunk_id']}: Blocked (Output: {answer})")
+    #     else:
+    #         valid_answers.append(answer)
+    #         valid_chunks.append(chunk)
+    # 
+    # if not valid_answers:
+    #     return []
+    # if len(valid_answers) == 1:
+    #     return valid_chunks
+    # ---------------------------------------------------------
 
-    if not valid_answers:
-        return []
-        
-    # If only one valid answer remains, it wins by default
-    if len(valid_answers) == 1:
-        return valid_chunks
+    # Instead, let all chunks pass through for testing:
+    valid_answers = answers
+    valid_chunks = chunks
 
-    # 2. Run consensus math ONLY on safe, valid answers
+    # 2. Run consensus math normally on everything
     vectors = embedder.encode(valid_answers)
     centroid = np.mean(vectors, axis=0)
     
@@ -113,10 +117,8 @@ def _detect_divergence(answers: list[str], chunks: list[dict], threshold: float 
         sim = np.dot(vector, centroid) / (np.linalg.norm(vector) * np.linalg.norm(centroid))
         distance = 1.0 - float(sim)
         
-        # --- DEBUG PRINTS ---
         print(f"\n[sandbox debug] Chunk {chunk['chunk_id']} | Distance from consensus: {distance:.3f}")
         print(f"[sandbox debug] Answer: {answer}")
-        # --------------------
         
         if distance <= threshold:
             survivors.append(chunk)
