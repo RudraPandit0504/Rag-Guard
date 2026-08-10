@@ -1,5 +1,6 @@
 import asyncio
 from dotenv import load_dotenv
+
 load_dotenv()  # This forces Python to read your .env file
 # Import Role 1 (Retrieval)
 from src.role1_ingestion.retriever import retrieve
@@ -45,7 +46,7 @@ async def test_pipeline():
     # ROLE 3: SANDBOX & AUTHORITY (YOURS)
     # ==========================================
     print("\n--- 3. SANDBOX & AUTHORITY (ROLE 3) ---")
-    final_survivors = await apply_sandbox_filters(math_survivors)
+    final_survivors = await apply_sandbox_filters(math_survivors, query)
     print(f"{len(final_survivors)}/{len(math_survivors)} survived Role 3.")
     
     for c in final_survivors:

@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from pymongo import MongoClient
 from ..config import MONGO_URI, DB_NAME
 
-T_BASE = 1.0
 LAMBDA = 0.005
 MIN_AUTHORITY = 0.1
 
@@ -22,7 +21,6 @@ def _get_baseline_epoch() -> datetime:
     except Exception as e:
         print(f"[authority] Failed to fetch baseline epoch from DB: {e}")
     
-    # Fallback to current time if DB is empty or unreachable
     return datetime.now(timezone.utc)
 
 BASELINE_EPOCH = _get_baseline_epoch()
@@ -43,8 +41,11 @@ def age_days(created_at: datetime) -> float:
     return max(0.0, delta)
 
 def authority_score(chunk: dict) -> float:
-    """Authority_Score = max(0.1, T_base - (lambda * Age_days))"""
-    return max(MIN_AUTHORITY, T_BASE - LAMBDA * age_days(chunk["created_at"]))
+    """
+    Corrected inverted formula: Older documents have a higher age_days, yielding a higher trust score.
+    Newer injected documents have a lower age_days, yielding lower trust.
+    """
+    return MIN_AUTHORITY + (LAMBDA * age_days(chunk["created_at"]))
 
 def apply_authority_checks(chunks: list[dict]) -> list[dict]:
     """Attach `hash_valid` and `authority_score` to every chunk."""
