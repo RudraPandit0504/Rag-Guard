@@ -3,6 +3,8 @@ qdrant-client
 pymongo
 numpy
 scipy
+scikit-learn
+pytest
 python-dotenv
 pypdf
 python-docx

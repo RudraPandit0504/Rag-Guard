@@ -1,7 +1,6 @@
 import numpy as np
 
 from ..config import OUTLIER_THRESHOLD, DEFAULT_TOP_K
-from ..role1_ingestion.retriever import retrieve
 
 
 def compute_centroid(chunks: list[dict]) -> np.ndarray:
@@ -53,6 +52,8 @@ def analyze(query: str, top_k: int = DEFAULT_TOP_K) -> None:
 
     This is a report, not a filter — nothing here changes retrieval results.
     """
+    from ..role1_ingestion.retriever import retrieve
+
     chunks = retrieve(query, top_k=top_k)
     centroid = compute_centroid(chunks)
     kept, _ = detect_outliers(chunks)
@@ -81,6 +82,8 @@ def sweep(
     reimplemented here. The poisoned flag is only read after each threshold's
     decision is already made, to describe what that decision did.
     """
+    from ..role1_ingestion.retriever import retrieve
+
     chunks = retrieve(query, top_k=top_k)
 
     print(f"Q: {query}\n")

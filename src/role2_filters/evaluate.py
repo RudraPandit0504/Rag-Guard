@@ -1,6 +1,5 @@
 from .filters import apply_math_filters_verbose
 from ..config import OUTLIER_THRESHOLD, CONSISTENCY_THRESHOLD, DEFAULT_TOP_K
-from ..role1_ingestion.retriever import retrieve
 
 
 TEST_QUERIES = [
@@ -29,6 +28,8 @@ def evaluate_baseline(queries: list[str], top_k: int = DEFAULT_TOP_K) -> dict:
     Nothing is removed in the baseline, so poisoned_surviving always equals
     poisoned_retrieved and legit_removed is always 0.
     """
+    from ..role1_ingestion.retriever import retrieve
+
     per_query = {}
     for query in queries:
         chunks = retrieve(query, top_k=top_k)
@@ -50,12 +51,20 @@ def evaluate_defended(queries: list[str], top_k: int = DEFAULT_TOP_K, thresholds
 
     Uses the verbose variant because the collateral count needs the dropped
     list, not just the survivors.
+
+    `thresholds` is passed straight through to apply_math_filters_verbose, so it
+    can carry any of that function's arguments — including outlier_method and
+    min_cluster_size, which is how compare_methods() swaps algorithms. Passing
+    it at all replaces the default pair rather than merging with it; anything
+    left out falls back to the value in config.py.
     """
     if thresholds is None:
         thresholds = {
             "outlier_threshold": OUTLIER_THRESHOLD,
             "consistency_threshold": CONSISTENCY_THRESHOLD,
         }
+
+    from ..role1_ingestion.retriever import retrieve
 
     per_query = {}
     for query in queries:
@@ -120,5 +129,60 @@ def report(queries: list[str] = TEST_QUERIES, top_k: int = DEFAULT_TOP_K, thresh
     )
 
 
+# Each variant isolates one filtering strategy so their contributions can be
+# read apart. "coherence only" disables both consensus stages by setting
+# thresholds nothing can fall below, leaving the per-chunk check alone.
+COMPARISON_VARIANTS = {
+    "centroid": {"outlier_method": "centroid", "use_coherence": False},
+    "hdbscan": {"outlier_method": "hdbscan", "use_coherence": False},
+    "coherence": {
+        "use_coherence": True,
+        "outlier_method": "centroid",
+        "outlier_threshold": 99.0,
+        "consistency_threshold": -1.0,
+    },
+    "coherence+hdbscan": {"outlier_method": "hdbscan", "use_coherence": True},
+}
+
+
+def compare_methods(queries: list[str] = TEST_QUERIES, top_k: int = DEFAULT_TOP_K) -> dict:
+    """Score every filtering strategy against the same retrievals.
+
+    Baseline is unfiltered retrieval, so all variants are measured against an
+    identical starting point. Each value is in the shape _totals() produces.
+    """
+    results = {"baseline": evaluate_baseline(queries, top_k=top_k)}
+
+    for name, thresholds in COMPARISON_VARIANTS.items():
+        results[name] = evaluate_defended(queries, top_k=top_k, thresholds=thresholds)
+
+    return results
+
+
+def compare_report(queries: list[str] = TEST_QUERIES, top_k: int = DEFAULT_TOP_K) -> dict:
+    """Print every filtering strategy side by side on the same retrievals."""
+    results = compare_methods(queries, top_k=top_k)
+
+    header = f"{'method':<18}  {'poison_retr':>11}  {'poison_surv':>11}  {'score':>8}  {'legit_removed':>13}"
+    print(f"\nFilter comparison ({len(queries)} queries, top_k={top_k})\n")
+    print(header)
+    print("-" * len(header))
+
+    for name in ("baseline", *COMPARISON_VARIANTS):
+        total = results[name]["total"]
+        print(
+            f"{name:<18}  {total['poisoned_retrieved']:>11}  {total['poisoned_surviving']:>11}  "
+            f"{_format_score(_vulnerability_score(total)):>8}  {total['legit_removed']:>13}"
+        )
+
+    print(
+        "\nscore = Vulnerability Score, poison surviving / poison retrieved; lower is safer."
+        "\nlegit_removed = legitimate chunks lost as collateral; lower is better."
+        "\nA method is only better than another if it lowers one without raising the other."
+    )
+    return results
+
+
 if __name__ == "__main__":
     report()
+    compare_report()
